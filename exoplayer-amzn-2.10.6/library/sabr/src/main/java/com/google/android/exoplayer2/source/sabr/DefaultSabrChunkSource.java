@@ -46,6 +46,7 @@ import com.google.android.exoplayer2.util.MimeTypes;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -582,11 +583,21 @@ public class DefaultSabrChunkSource implements SabrChunkSource {
         // a sabr segment and must not advance the stream.
         if (representationHolder.extractorWrapper == null) {
             Representation subtitleRepresentation = representationHolder.representation;
+            // Same header the dash source sends, for the same reason: this GET
+            // goes to youtube directly rather than through the SABR endpoint,
+            // so it faces the bot check on its own.
             DataSpec subtitleSpec = new DataSpec(
                     Uri.parse(subtitleRepresentation.baseUrl),
+                    DataSpec.HTTP_METHOD_GET,
+                    null,
+                    0,
                     0,
                     C.LENGTH_UNSET,
-                    subtitleRepresentation.getCacheKey());
+                    subtitleRepresentation.getCacheKey(),
+                    0,
+                    manifest.visitorCookie != null
+                            ? Collections.singletonMap("Cookie", manifest.visitorCookie)
+                            : Collections.<String, String>emptyMap());
             return new SingleSampleMediaChunk(
                     dataSource,
                     subtitleSpec,

@@ -86,6 +86,17 @@ public class SabrManifest implements FilterableManifest<SabrManifest> {
     private final String videoPlaybackUstreamerConfig;
     private final String poToken;
     private final ClientInfo clientInfo;
+
+    /**
+     * Cookie to send when fetching a subtitle track.
+     *
+     * Subtitles are the one thing here fetched with an ordinary GET from their
+     * own url rather than through the SABR endpoint, and that request is
+     * subject to the bot check like any other. The dash source carries the same
+     * value for the same reason.
+     */
+    @Nullable public final String visitorCookie;
+
     private final Map<Integer, SabrStream> sabrStreams;
     private int sabrRequestNumber = -1;
     private final FormatSelector emptySelector;
@@ -104,7 +115,8 @@ public class SabrManifest implements FilterableManifest<SabrManifest> {
             String videoPlaybackUstreamerConfig,
             String poToken,
             String videoId,
-            ClientInfo clientInfo) {
+            ClientInfo clientInfo,
+            @Nullable String visitorCookie) {
         this.availabilityStartTimeMs = availabilityStartTimeMs;
         this.durationMs = durationMs;
         this.minBufferTimeMs = minBufferTimeMs;
@@ -119,6 +131,7 @@ public class SabrManifest implements FilterableManifest<SabrManifest> {
         this.videoPlaybackUstreamerConfig = videoPlaybackUstreamerConfig;
         this.clientInfo = clientInfo;
         this.poToken = poToken;
+        this.visitorCookie = visitorCookie;
         this.sabrStreams = new HashMap<>();
         this.emptySelector = new FormatSelector("ignored", true);
     }
