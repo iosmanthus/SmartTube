@@ -11,17 +11,45 @@
 # died with it, which looks from the device like an update source that works
 # and then does not.
 #
-# Usage: tools/build.sh <versionCode> [suffix]
+# Releases are dated rather than numbered. Nothing here tracks upstream's
+# version, and a date says the one thing worth knowing about a build of a fork:
+# how old it is.
+#
+#   versionName   32.31-2026.08.28
+#   versionCode   202608280          YYYYMMDD plus a same-day counter
+#
+# versionCode has to be an increasing int; YYYYMMDDn stays inside int range
+# until the year 2147 and sorts correctly for free.
+#
+# Diagnostics are OFF unless DIAG_LEVEL is set. When it is unset the endpoint,
+# token and pin are not passed at all, so a release build carries no collector
+# address and no credential for one -- the reporting code compiles to something
+# that can never fire.
+#
+# Usage: tools/build.sh [same-day-counter]        # dated release
+#        DIAG_LEVEL=basic tools/build.sh 1        # same, with reporting on
 set -euo pipefail
 
-CODE="${1:?usage: build.sh <versionCode> [suffix]}"
-SUFFIX="${2:--local}"
+SERIAL="${1:-0}"
+CODE="$(date +%Y%m%d)$SERIAL"
+SUFFIX="-$(date +%Y.%m.%d)"
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${SVC_HOST:-macmini-home}"
 LAN_IP="${SVC_LAN_IP:-192.168.31.102}"
-SERVE_IP="${SERVE_IP:-192.168.31.88}"
+# The update source lives on the same always-on box as the services, not on
+# whatever laptop did the build. A laptop's dhcp address changes, and an address
+# with no host behind it is worse than one that refuses: the connect hangs
+# rather than failing, and SmartTube's update check has no timeout, so the
+# browse screen spins until somebody force-stops the app.
+# Two different names for the same box, on purpose. SERVE_SSH is how *this*
+# machine reaches it to upload; SERVE_HOST is what gets compiled into the app,
+# so it has to be something the television can resolve and route to -- an ssh
+# alias is neither.
+SERVE_SSH="${SERVE_SSH:-macmini-home}"
+SERVE_HOST="${SERVE_HOST:-192.168.31.102}"
 SERVE_PORT="${SERVE_PORT:-8088}"
+SERVE_DIR="${SERVE_DIR:-/var/lib/smarttube-updatesvc}"
 # shellcheck disable=SC2029  # the argument is meant to expand on this side
 remote_pin() {
     ssh "$HOST" "$1" | sed 's/.*=//' | tr -d ':'
@@ -36,26 +64,41 @@ COOKIE_TOKEN="$(ssh "$HOST" 'cat /run/secrets/smarttube-cookie-token')"
 # shellcheck disable=SC2016  # $HOME must stay literal and expand remotely
 COOKIE_PIN="$(remote_pin 'openssl x509 -noout -fingerprint -sha256 \
     -in "$HOME/Library/Application Support/smarttube-cookiesvc-state/cookies.crt"')"
-DIAG_TOKEN="$(ssh "$HOST" 'sudo cat /run/secrets/smarttube-log-token')"
-DIAG_PIN="$(remote_pin 'sudo openssl x509 -noout -fingerprint -sha256 \
-    -in /var/lib/smarttube-logsvc/logs.crt')"
+DIAG_TOKEN=""
+DIAG_PIN=""
+if [ -n "${DIAG_LEVEL:-}" ]; then
+    # Only read when they are going to be used. A release build should not so
+    # much as fetch the collector's credentials, let alone carry them.
+    DIAG_TOKEN="$(ssh "$HOST" 'sudo cat /run/secrets/smarttube-log-token')"
+    DIAG_PIN="$(remote_pin 'sudo openssl x509 -noout -fingerprint -sha256 \
+        -in /var/lib/smarttube-logsvc/logs.crt')"
+    for v in DIAG_TOKEN DIAG_PIN; do
+        [ -n "${!v}" ] || { echo "$v came back empty" >&2; exit 1; }
+    done
+fi
 
-for v in COOKIE_TOKEN COOKIE_PIN DIAG_TOKEN DIAG_PIN; do
+for v in COOKIE_TOKEN COOKIE_PIN; do
     [ -n "${!v}" ] || { echo "$v came back empty" >&2; exit 1; }
 done
-echo "    cookie pin ${COOKIE_PIN:0:16}…  diag pin ${DIAG_PIN:0:16}…"
+echo "    cookie pin ${COOKIE_PIN:0:16}…"
 
 echo "==> building"
 cd "$HERE"
+DIAG_ARGS=""
+if [ -n "${DIAG_LEVEL:-}" ]; then
+    echo "    diagnostics: $DIAG_LEVEL"
+    DIAG_ARGS="-PdiagEndpoint='https://$LAN_IP:5568/logs' \
+        -PdiagToken='$DIAG_TOKEN' -PdiagPin='$DIAG_PIN' -PdiagLevel='$DIAG_LEVEL'"
+else
+    echo "    diagnostics: off (no collector address or token compiled in)"
+fi
+
 nix-shell tools/android-shell.nix --run "./gradlew --no-daemon assembleStbetaRelease \
     -PcookieAuthEndpoint='https://$LAN_IP:5567/' \
     -PcookieAuthToken='$COOKIE_TOKEN' \
     -PcookieAuthPin='$COOKIE_PIN' \
-    -PdiagEndpoint='https://$LAN_IP:5568/logs' \
-    -PdiagToken='$DIAG_TOKEN' \
-    -PdiagPin='$DIAG_PIN' \
-    -PdiagLevel='${DIAG_LEVEL:-off}' \
-    -PupdateUrl='http://$SERVE_IP:$SERVE_PORT/manifest.json' \
+    $DIAG_ARGS \
+    -PupdateUrl='http://$SERVE_HOST:$SERVE_PORT/manifest.json' \
     -PbuildVersionCode='$CODE' \
     -PbuildVersionSuffix='$SUFFIX'"
 
@@ -76,11 +119,20 @@ nix-shell -p apksigner --run "apksigner sign \
 VERSION="$(echo "$NAME" | sed 's/^SmartTube_beta_//; s/_universal\.apk$//')"
 cat > serve/manifest.json <<JSON
 {
-  "package": { "downloadUrl": "http://$SERVE_IP:$SERVE_PORT/smarttube.apk" },
+  "package": { "downloadUrl": "http://$SERVE_HOST:$SERVE_PORT/smarttube.apk" },
   "$VERSION": { "versionCode": $CODE, "changelog": ["local build"] }
 }
 JSON
 
-echo "==> published to serve/"
-echo "    start (or leave running) the server with: tools/serve.sh"
-echo "    then on the tv: Settings, About, Check for updates"
+echo "==> uploading to $SERVE_SSH"
+# The apk first, the manifest second: the manifest is what makes the device go
+# looking, so publishing it before the file it points at is a window where the
+# updater finds a version it cannot download.
+scp -q serve/smarttube.apk "$SERVE_SSH:$SERVE_DIR/smarttube.apk.part"
+# shellcheck disable=SC2029  # $SERVE_DIR is ours and must expand here
+ssh "$SERVE_SSH" "mv '$SERVE_DIR/smarttube.apk.part' '$SERVE_DIR/smarttube.apk'"
+scp -q serve/manifest.json "$SERVE_SSH:$SERVE_DIR/manifest.json"
+
+echo "==> published $VERSION (versionCode $CODE)"
+curl -fsS --max-time 10 "http://$SERVE_HOST:$SERVE_PORT/manifest.json" | sed 's/^/    /'
+echo "    on the tv: Settings, About, Check for updates"
