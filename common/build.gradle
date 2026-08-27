@@ -46,6 +46,13 @@ android {
         buildConfigField "String", "DIAG_LEVEL",
                 "\"" + (project.findProperty("diagLevel") ?: "off") + "\""
 
+        // An update manifest to consult before the upstream one. Empty by
+        // default, so a build with nothing set behaves exactly like upstream.
+        // Lets a fork ship its own builds to its own devices without editing a
+        // resource file that then has to be un-edited before anything is shared.
+        buildConfigField "String", "UPDATE_URL",
+                "\"" + (project.findProperty("updateUrl") ?: "") + "\""
+
         // More info: http://myhexaville.com/2017/03/10/android-multidex/
         // Additionally, you should extend your application from MultiDexApplication
         multiDexEnabled = true

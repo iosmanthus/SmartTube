@@ -1,5 +1,6 @@
 package com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs;
 
+import com.liskovsoft.smartyoutubetv2.common.BuildConfig;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.appupdatechecker2.AppUpdateChecker;
@@ -31,7 +32,28 @@ public class AppUpdatePresenter extends BasePresenter<Void> implements AppUpdate
         super(context);
         mUpdateChecker = new AppUpdateChecker(context, this);
         mSettingsPresenter = AppDialogPresenter.instance(context);
-        mUpdateManifestUrls = context.getResources().getStringArray(R.array.update_urls);
+        mUpdateManifestUrls = withConfiguredUrl(context.getResources().getStringArray(R.array.update_urls));
+    }
+
+    /**
+     * Put the build's own update manifest ahead of the shipped ones.
+     *
+     * The checker tries each url in turn and uses the first that answers, so
+     * prepending is enough to redirect a fork's devices at its own builds while
+     * leaving upstream as the fallback. Empty unless the build sets it.
+     */
+    private static String[] withConfiguredUrl(String[] urls) {
+        String configured = BuildConfig.UPDATE_URL;
+
+        if (configured == null || configured.isEmpty()) {
+            return urls;
+        }
+
+        String[] out = new String[urls.length + 1];
+        out[0] = configured;
+        System.arraycopy(urls, 0, out, 1, urls.length);
+
+        return out;
     }
 
     public static AppUpdatePresenter instance(Context context) {
