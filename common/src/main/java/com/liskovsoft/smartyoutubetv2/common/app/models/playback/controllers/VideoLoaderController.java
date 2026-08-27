@@ -314,7 +314,13 @@ public class VideoLoaderController extends BasePlayerController {
             return;
         }
 
+        // The tag, not just the name: several clients report the same InnerTube
+        // name, and the cookie-authorized one is indistinguishable from the
+        // anonymous one without it.
         String client = info.getClientInfo() != null
+                ? info.getClientInfo().getClientTag()
+                : "null";
+        String innerTube = info.getClientInfo() != null
                 ? info.getClientInfo().getClientName() + "/" + info.getClientInfo().getClientVersion()
                 : "null";
         String poToken = info.getPoToken();
@@ -322,6 +328,7 @@ public class VideoLoaderController extends BasePlayerController {
         DiagnosticsReporter.report(Level.BASIC, "format_info",
                 "video_id", info.getVideoId(),
                 "client", client,
+                "innertube", innerTube,
                 "pot_len", poToken == null ? 0 : poToken.length(),
                 "reason", String.valueOf(info.getPlayabilityReason()),
                 "unplayable", info.isUnplayable(),

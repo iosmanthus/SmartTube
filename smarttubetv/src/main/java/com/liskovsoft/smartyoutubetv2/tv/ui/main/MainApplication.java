@@ -34,6 +34,7 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.SearchTagsActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.signin.SignInActivity;
 import com.liskovsoft.smartyoutubetv2.common.cookieauth.CookieAuthClient;
 import com.liskovsoft.smartyoutubetv2.common.cookieauth.CookieAuthConfig;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig.Level;
 import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsReporter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.webbrowser.WebBrowserActivity;
 
@@ -96,84 +97,70 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
     }
 
     /**
-     * Hand the youtube api a signed-in web session.
+     * Hand the youtube api a signed-in web session, without ever blocking.
      *
-     * Nothing here caches to disk. Google rotates the session cookies as the
-     * holder browses, so anything written down is a snapshot of a session that
-     * has since moved on; the service answers from its live browser instead.
-     * The in-memory copy is deliberately kept on a failed refresh -- it is
-     * probably still good, and dropping it would turn a blip in the service
-     * into a device that cannot play anything.
+     * An earlier version waited on the first fetch so that nothing could play
+     * before the cookies landed. That was the wrong trade: when the service is
+     * unreachable the wait is the full timeout, on the main thread, during
+     * onCreate -- the ui simply freezes, and the user is left pressing buttons
+     * at a dead screen. A video that fails because the cookies have not arrived
+     * yet is a far smaller problem, and the next one works.
+     *
+     * Nothing is cached to disk. Google rotates the session as the holder
+     * browses, so anything written down is a snapshot of a session that has
+     * moved on. The in-memory copy is deliberately kept across a failed
+     * refresh: it is probably still good, and dropping it would turn a blip in
+     * the service into a device that cannot play at all.
      */
     private void loadSessionCookies() {
         if (!CookieAuthConfig.isConfigured()) {
             return;
         }
 
-        try {
-            String cookies = fetchCookiesBlocking();
-            CookieAuthStore.setCookies(cookies);
-            Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
-            // Length only, at every level: this is a full Google session.
-            DiagnosticsReporter.reportSecretLength("cookies_loaded", "cookie", cookies);
-            startCookieRefresh();
-        } catch (Throwable e) {
-            Log.w(COOKIE_TAG, "cookie load failed: " + e);
-        }
-    }
-
-    /**
-     * Fetch once, on a worker thread, and wait a bounded time for it.
-     *
-     * Waiting at all is a compromise. Android forbids network on the main
-     * thread, and nothing can play before the cookies land, so startup blocks
-     * briefly rather than letting the first video fall through to the anonymous
-     * clients and fail. The bound keeps an absent service from turning into an
-     * app that will not start.
-     */
-    private String fetchCookiesBlocking() {
-        final String[] holder = new String[1];
-        Thread fetch = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                holder[0] = new CookieAuthClient().fetch();
-            }
-        }, "cookie-fetch");
-        fetch.start();
-
-        try {
-            fetch.join(CookieAuthConfig.CONNECT_TIMEOUT_MS + CookieAuthConfig.READ_TIMEOUT_MS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        return holder[0];
-    }
-
-    /** Keep the header current for a session that stays open for days. */
-    private void startCookieRefresh() {
-        final long periodMs = CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
-
-        Thread refresher = new Thread(new Runnable() {
+        Thread loader = new Thread(new Runnable() {
             @Override
             public void run() {
                 CookieAuthClient client = new CookieAuthClient();
+                // Retry quickly at first: at boot the app can easily win the
+                // race against the network coming up, and waiting the full
+                // refresh period for that would leave the device unusable.
+                long[] backoffMs = { 0, 10_000, 30_000, 60_000 };
+                int attempt = 0;
+
                 while (true) {
-                    try {
-                        Thread.sleep(periodMs);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
+                    long wait = attempt < backoffMs.length
+                            ? backoffMs[attempt]
+                            : CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
+                    if (wait > 0) {
+                        try {
+                            Thread.sleep(wait);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
                     }
-                    String fresh = client.fetch();
-                    if (fresh != null && !fresh.trim().isEmpty()) {
-                        CookieAuthStore.setCookies(fresh);
+
+                    CookieAuthClient.Result result = client.fetchWithReason();
+                    if (result.header != null) {
+                        CookieAuthStore.setCookies(result.header);
+                        DiagnosticsReporter.report(Level.BASIC, "cookies_loaded",
+                                "cookie_len", result.header.length(),
+                                "attempt", attempt);
+                        // Settle into the refresh cadence once it works.
+                        attempt = backoffMs.length;
+                    } else {
+                        DiagnosticsReporter.report(Level.BASIC, "cookies_failed",
+                                "reason", result.reason,
+                                "attempt", attempt);
+                        attempt++;
                     }
+
+                    Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
                 }
             }
-        }, "cookie-refresh");
-        refresher.setDaemon(true);
-        refresher.start();
+        }, "cookie-loader");
+        loader.setDaemon(true);
+        loader.start();
     }
 
     private void setupViewManager() {
