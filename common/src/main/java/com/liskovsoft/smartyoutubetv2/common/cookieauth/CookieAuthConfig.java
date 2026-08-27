@@ -22,9 +22,27 @@ import com.liskovsoft.smartyoutubetv2.common.net.PinnedHttps;
  * certificate, so neither switch touches the other.
  */
 public final class CookieAuthConfig {
-    /** Long enough to outlast a slow lan round trip, short enough not to stall startup. */
-    public static final int CONNECT_TIMEOUT_MS = 4000;
-    public static final int READ_TIMEOUT_MS = 8000;
+    /**
+     * Generous, because nothing waits on these any more.
+     *
+     * The service answers in tens of milliseconds when everything is well, so a
+     * long timeout costs nothing then. What it buys is the case that actually
+     * happened: a device busy with its own startup, where an eight second read
+     * timeout lost the race and left the session unavailable for the whole
+     * retry interval.
+     */
+    public static final int CONNECT_TIMEOUT_MS = 8000;
+    public static final int READ_TIMEOUT_MS = 20000;
+
+    /**
+     * How long to wait after a failure, capped.
+     *
+     * A failed fetch used to fall through to the refresh interval, so one
+     * unlucky timeout at startup meant twenty minutes with no session and
+     * every video failing. Nothing is gained by waiting that long to find out
+     * the service is back.
+     */
+    public static final int RETRY_MAX_MS = 60_000;
 
     /**
      * How often to re-ask for the header.

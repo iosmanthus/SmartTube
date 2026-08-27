@@ -123,41 +123,45 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
             @Override
             public void run() {
                 CookieAuthClient client = new CookieAuthClient();
-                // Retry quickly at first: at boot the app can easily win the
-                // race against the network coming up, and waiting the full
-                // refresh period for that would leave the device unusable.
-                long[] backoffMs = { 0, 10_000, 30_000, 60_000 };
-                int attempt = 0;
+                int failures = 0;
 
                 while (true) {
-                    long wait = attempt < backoffMs.length
-                            ? backoffMs[attempt]
-                            : CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
-                    if (wait > 0) {
-                        try {
-                            Thread.sleep(wait);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            return;
-                        }
-                    }
-
+                    long started = System.currentTimeMillis();
                     CookieAuthClient.Result result = client.fetchWithReason();
+                    long tookMs = System.currentTimeMillis() - started;
+
+                    long sleepMs;
                     if (result.header != null) {
                         CookieAuthStore.setCookies(result.header);
                         DiagnosticsReporter.report(Level.BASIC, "cookies_loaded",
                                 "cookie_len", result.header.length(),
-                                "attempt", attempt);
-                        // Settle into the refresh cadence once it works.
-                        attempt = backoffMs.length;
+                                "took_ms", tookMs,
+                                "after_failures", failures);
+                        failures = 0;
+                        sleepMs = CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
                     } else {
+                        failures++;
+                        // The elapsed time separates a refusal from a timeout
+                        // without having to guess from the exception name.
                         DiagnosticsReporter.report(Level.BASIC, "cookies_failed",
                                 "reason", result.reason,
-                                "attempt", attempt);
-                        attempt++;
+                                "took_ms", tookMs,
+                                "failures", failures);
+                        // Back off, but never past a minute: a failure used to
+                        // fall through to the refresh interval, so one unlucky
+                        // timeout at startup cost twenty minutes of a device
+                        // that could not play anything.
+                        sleepMs = Math.min(CookieAuthConfig.RETRY_MAX_MS, 5000L * failures);
                     }
 
                     Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
+
+                    try {
+                        Thread.sleep(sleepMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                 }
             }
         }, "cookie-loader");
