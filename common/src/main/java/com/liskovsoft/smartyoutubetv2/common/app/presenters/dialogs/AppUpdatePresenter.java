@@ -1,6 +1,11 @@
 package com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs;
 
 import com.liskovsoft.smartyoutubetv2.common.BuildConfig;
+import android.net.Uri;
+import com.liskovsoft.sharedutils.helpers.FileHelpers;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig.Level;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsReporter;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.appupdatechecker2.AppUpdateChecker;
@@ -118,6 +123,7 @@ public class AppUpdatePresenter extends BasePresenter<Void> implements AppUpdate
         mSettingsPresenter.appendSingleButton(
                 UiOptionItem.from(getContext().getString(R.string.install_update), optionItem -> {
                     GeneralData.instance(getContext()).setChangelog(changelog);
+                    reportInstallAttempt("dialog", apkPath);
                     mUpdateChecker.installUpdate();
                 }, false));
         mSettingsPresenter.appendStringsCategory(getContext().getString(R.string.update_changelog), createChangelogOptions(changelog));
@@ -139,6 +145,7 @@ public class AppUpdatePresenter extends BasePresenter<Void> implements AppUpdate
             @Override
             public void onAction() {
                 GeneralData.instance(getContext()).setChangelog(changelog);
+                reportInstallAttempt("pinned", apkPath);
                 mUpdateChecker.installUpdate();
             }
 
@@ -154,6 +161,44 @@ public class AppUpdatePresenter extends BasePresenter<Void> implements AppUpdate
                 return getContext().getString(R.string.install_update);
             }
         });
+    }
+
+    /**
+     * Record what the install had to work with, before it is attempted.
+     *
+     * Installing an update is the one flow that cannot report on itself: it
+     * either replaces the process or leaves no trace at all. Helpers.
+     * installPackage() returns silently when FileProvider cannot resolve the
+     * apk -- which is exactly what a press that appears to do nothing looks
+     * like -- so the inputs are recorded here, while there is still a process
+     * to record them from.
+     */
+    private void reportInstallAttempt(String source, String apkPath) {
+        if (!DiagnosticsConfig.isEnabled()) {
+            return;
+        }
+
+        Context context = getContext();
+        java.io.File apk = apkPath != null ? new java.io.File(apkPath) : null;
+        String uri;
+        try {
+            Uri resolved = FileHelpers.getFileUri(context, apkPath);
+            uri = resolved != null ? resolved.getScheme() + "://" + resolved.getAuthority() : "null";
+        } catch (Throwable e) {
+            uri = "threw:" + e.getClass().getSimpleName();
+        }
+
+        DiagnosticsReporter.report(Level.BASIC, "update_install",
+                "source", source,
+                // Whether the presenter had a real Activity matters: an install
+                // intent started from the application context becomes its own
+                // task and can end up behind the one that started it.
+                "context", context == null ? "null" : context.getClass().getSimpleName(),
+                "apk_exists", apk != null && apk.exists(),
+                "apk_bytes", apk != null && apk.exists() ? apk.length() : 0,
+                "apk_dir", apk != null && apk.getParentFile() != null
+                        ? apk.getParentFile().getAbsolutePath() : "null",
+                "file_uri", uri);
     }
 
     private List<OptionItem> createChangelogOptions(List<String> changelog) {
