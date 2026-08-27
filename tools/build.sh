@@ -6,6 +6,11 @@
 # here or in git. The certificate pins come from the certificates themselves,
 # so a reissued certificate needs no edit anywhere -- just another build.
 #
+# Building and serving are deliberately separate: this script is run under a
+# timeout often enough that having it also *be* the server meant the server
+# died with it, which looks from the device like an update source that works
+# and then does not.
+#
 # Usage: tools/build.sh <versionCode> [suffix]
 set -euo pipefail
 
@@ -76,5 +81,6 @@ cat > serve/manifest.json <<JSON
 }
 JSON
 
-echo "==> serving on :$SERVE_PORT — on the tv: Settings, About, Check for updates"
-cd serve && exec python3 -m http.server "$SERVE_PORT" --bind 0.0.0.0
+echo "==> published to serve/"
+echo "    start (or leave running) the server with: tools/serve.sh"
+echo "    then on the tv: Settings, About, Check for updates"
