@@ -70,3 +70,6 @@ tmp/
 fabric.properties
 *BAK.java
 hs_err_pid*.log
+
+# Built apks and the manifest tools/build.sh publishes
+/serve/
