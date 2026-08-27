@@ -90,6 +90,8 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
             }
         }
 
+        DiagnosticsReporter.attachToApi();
+
         loadSessionCookies();
 
         setupGlobalExceptionHandler();

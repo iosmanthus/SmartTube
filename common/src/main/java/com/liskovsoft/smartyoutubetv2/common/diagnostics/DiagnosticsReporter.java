@@ -2,6 +2,8 @@ package com.liskovsoft.smartyoutubetv2.common.diagnostics;
 
 import android.util.Log;
 
+import com.liskovsoft.mediaserviceinterfaces.diagnostics.ApiDiagnostics;
+
 import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig.Level;
 import com.liskovsoft.smartyoutubetv2.common.net.PinnedHttps;
 
@@ -41,6 +43,26 @@ public final class DiagnosticsReporter {
     private static volatile boolean sStarted;
 
     private DiagnosticsReporter() {
+    }
+
+    /**
+     * Start listening to the api layer.
+     *
+     * It cannot depend on this module, so it reports through an interface in
+     * the one they both share. Attaching is what turns those calls on; until
+     * this runs, the api layer reports into nowhere.
+     */
+    public static void attachToApi() {
+        if (!DiagnosticsConfig.isEnabled()) {
+            return;
+        }
+
+        ApiDiagnostics.setSink(new ApiDiagnostics.Sink() {
+            @Override
+            public void onApiEvent(String event, Object... keyValues) {
+                report(Level.BASIC, event, keyValues);
+            }
+        });
     }
 
     /**
