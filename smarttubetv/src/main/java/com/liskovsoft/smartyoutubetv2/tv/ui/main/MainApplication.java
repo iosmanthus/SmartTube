@@ -1,6 +1,7 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.main;
 
 import android.os.Build.VERSION;
+import android.util.Log;
 
 import androidx.multidex.MultiDexApplication;
 
@@ -31,7 +32,11 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.dialogs.AppDialogActivityOpaque;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.SearchTagsActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.signin.SignInActivity;
+import com.liskovsoft.smartyoutubetv2.tv.cookieauth.CookieAuthClient;
+import com.liskovsoft.smartyoutubetv2.tv.cookieauth.CookieAuthConfig;
 import com.liskovsoft.smartyoutubetv2.tv.ui.webbrowser.WebBrowserActivity;
+
+import com.liskovsoft.youtubeapi.app.CookieAuthStore;
 
 import org.conscrypt.Conscrypt;
 
@@ -40,6 +45,8 @@ import java.security.Provider;
 import java.security.Security;
 
 public class MainApplication extends MultiDexApplication { // fix: Didn't find class "com.google.firebase.provider.FirebaseInitProvider"
+    private static final String COOKIE_TAG = "CookieAuth";
+
     static {
         // fix youtube bandwidth throttling (best - false)???
         // false is better for streams (less buffering)
@@ -81,8 +88,88 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
             }
         }
 
+        loadSessionCookies();
+
         setupGlobalExceptionHandler();
         setupViewManager();
+    }
+
+    /**
+     * Hand the youtube api a signed-in web session.
+     *
+     * Nothing here caches to disk. Google rotates the session cookies as the
+     * holder browses, so anything written down is a snapshot of a session that
+     * has since moved on; the service answers from its live browser instead.
+     * The in-memory copy is deliberately kept on a failed refresh -- it is
+     * probably still good, and dropping it would turn a blip in the service
+     * into a device that cannot play anything.
+     */
+    private void loadSessionCookies() {
+        if (!CookieAuthConfig.isConfigured()) {
+            return;
+        }
+
+        try {
+            CookieAuthStore.setCookies(fetchCookiesBlocking());
+            Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
+            startCookieRefresh();
+        } catch (Throwable e) {
+            Log.w(COOKIE_TAG, "cookie load failed: " + e);
+        }
+    }
+
+    /**
+     * Fetch once, on a worker thread, and wait a bounded time for it.
+     *
+     * Waiting at all is a compromise. Android forbids network on the main
+     * thread, and nothing can play before the cookies land, so startup blocks
+     * briefly rather than letting the first video fall through to the anonymous
+     * clients and fail. The bound keeps an absent service from turning into an
+     * app that will not start.
+     */
+    private String fetchCookiesBlocking() {
+        final String[] holder = new String[1];
+        Thread fetch = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                holder[0] = new CookieAuthClient().fetch();
+            }
+        }, "cookie-fetch");
+        fetch.start();
+
+        try {
+            fetch.join(CookieAuthConfig.CONNECT_TIMEOUT_MS + CookieAuthConfig.READ_TIMEOUT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        return holder[0];
+    }
+
+    /** Keep the header current for a session that stays open for days. */
+    private void startCookieRefresh() {
+        final long periodMs = CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
+
+        Thread refresher = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                CookieAuthClient client = new CookieAuthClient();
+                while (true) {
+                    try {
+                        Thread.sleep(periodMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    String fresh = client.fetch();
+                    if (fresh != null && !fresh.trim().isEmpty()) {
+                        CookieAuthStore.setCookies(fresh);
+                    }
+                }
+            }
+        }, "cookie-refresh");
+        refresher.setDaemon(true);
+        refresher.start();
     }
 
     private void setupViewManager() {
