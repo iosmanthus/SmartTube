@@ -17,6 +17,7 @@ import com.google.android.exoplayer2.source.chunk.Chunk;
 import com.google.android.exoplayer2.source.chunk.ChunkExtractorWrapper;
 import com.google.android.exoplayer2.source.chunk.ChunkHolder;
 import com.google.android.exoplayer2.source.chunk.ContainerMediaChunk;
+import com.google.android.exoplayer2.source.chunk.SingleSampleMediaChunk;
 import com.google.android.exoplayer2.source.chunk.InitializationChunk;
 import com.google.android.exoplayer2.source.chunk.MediaChunk;
 import com.google.android.exoplayer2.source.chunk.MediaChunkIterator;
@@ -571,6 +572,34 @@ public class DefaultSabrChunkSource implements SabrChunkSource {
             long firstSegmentNum,
             //int maxSegmentCount,
             long seekTimeUs) {
+        // MOD: subtitles have no container, so createExtractorWrapper() returns
+        // null for them -- and the dash source this was ported from handles that
+        // by fetching the whole file with a plain GET instead. That branch was
+        // commented out during the port, so a selected subtitle track ended up
+        // in a ContainerMediaChunk with a null wrapper and threw
+        // NullPointerException on ChunkExtractorWrapper.init a few minutes into
+        // playback. Handled before any sabr state is touched: a subtitle is not
+        // a sabr segment and must not advance the stream.
+        if (representationHolder.extractorWrapper == null) {
+            Representation subtitleRepresentation = representationHolder.representation;
+            DataSpec subtitleSpec = new DataSpec(
+                    Uri.parse(subtitleRepresentation.baseUrl),
+                    0,
+                    C.LENGTH_UNSET,
+                    subtitleRepresentation.getCacheKey());
+            return new SingleSampleMediaChunk(
+                    dataSource,
+                    subtitleSpec,
+                    trackFormat,
+                    trackSelectionReason,
+                    trackSelectionData,
+                    0,
+                    representationHolder.periodDurationUs,
+                    firstSegmentNum,
+                    trackType,
+                    trackFormat);
+        }
+
         boolean isInit = nexChunkIdx == -1;
         FormatId formatId = formatSelector.getSelectedFormatId();
         int iTag = formatId != null ? formatId.getItag() : -1;

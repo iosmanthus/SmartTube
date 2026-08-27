@@ -335,7 +335,12 @@ public class VideoLoaderController extends BasePlayerController {
                 "dash", info.containsDashFormats(),
                 "sabr", info.containsSabrFormats(),
                 "adaptive_formats", info.getAdaptiveFormats() == null
-                        ? 0 : info.getAdaptiveFormats().size());
+                        ? 0 : info.getAdaptiveFormats().size(),
+                // Subtitle tracks are the only representations that come with
+                // no container, so they are the only ones the sabr chunk source
+                // can hand a null extractor. Counting them says whether a
+                // playback that died mid-stream even had one to select.
+                "subtitles", info.getSubtitles() == null ? 0 : info.getSubtitles().size());
 
         if (DiagnosticsConfig.atLeast(Level.FULL)) {
             // Signed and directly fetchable by anyone holding them, for as long
