@@ -1,4 +1,4 @@
-package com.liskovsoft.smartyoutubetv2.tv.net;
+package com.liskovsoft.smartyoutubetv2.common.net;
 
 import java.security.MessageDigest;
 import java.security.cert.CertificateException;

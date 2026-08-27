@@ -6,6 +6,9 @@ import com.liskovsoft.mediaserviceinterfaces.MediaItemService;
 import com.liskovsoft.mediaserviceinterfaces.ServiceManager;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaFormat;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaItemFormatInfo;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig.Level;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsReporter;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaItemMetadata;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
@@ -295,6 +298,47 @@ public class VideoLoaderController extends BasePlayerController {
                            });
     }
 
+    /**
+     * Report what the player was actually handed.
+     *
+     * These are the fields that decide whether a stream will play at all, and
+     * the ones that are impossible to recover afterwards from a television: the
+     * client that minted the urls, whether it carried a po token, and whether
+     * the response arrived as dash or as sabr.
+     *
+     * The token is reported by length only. Its presence or absence is the
+     * interesting part; its value is a credential.
+     */
+    private void reportFormatInfo(MediaItemFormatInfo info) {
+        if (!DiagnosticsConfig.isEnabled()) {
+            return;
+        }
+
+        String client = info.getClientInfo() != null
+                ? info.getClientInfo().getClientName() + "/" + info.getClientInfo().getClientVersion()
+                : "null";
+        String poToken = info.getPoToken();
+
+        DiagnosticsReporter.report(Level.BASIC, "format_info",
+                "video_id", info.getVideoId(),
+                "client", client,
+                "pot_len", poToken == null ? 0 : poToken.length(),
+                "reason", String.valueOf(info.getPlayabilityReason()),
+                "unplayable", info.isUnplayable(),
+                "dash", info.containsDashFormats(),
+                "sabr", info.containsSabrFormats(),
+                "adaptive_formats", info.getAdaptiveFormats() == null
+                        ? 0 : info.getAdaptiveFormats().size());
+
+        if (DiagnosticsConfig.atLeast(Level.FULL)) {
+            // Signed and directly fetchable by anyone holding them, for as long
+            // as they last. Guarded behind the level for that reason alone.
+            DiagnosticsReporter.report(Level.FULL, "media_url",
+                    "video_id", info.getVideoId(),
+                    "sabr_url", String.valueOf(info.getServerAbrStreamingUrl()));
+        }
+    }
+
     private void processFormatInfo(MediaItemFormatInfo formatInfo) {
         PlaybackView player = getPlayer();
 
@@ -305,6 +349,8 @@ public class VideoLoaderController extends BasePlayerController {
         String bgImageUrl = null;
 
         getVideo().sync(formatInfo);
+
+        reportFormatInfo(formatInfo);
 
         // Fix stretched video for a couple milliseconds (before the onVideoSizeChanged gets called)
         applyAspectRatio(formatInfo);

@@ -32,8 +32,9 @@ import com.liskovsoft.smartyoutubetv2.tv.ui.dialogs.AppDialogActivityOpaque;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.search.tags.SearchTagsActivity;
 import com.liskovsoft.smartyoutubetv2.tv.ui.signin.SignInActivity;
-import com.liskovsoft.smartyoutubetv2.tv.cookieauth.CookieAuthClient;
-import com.liskovsoft.smartyoutubetv2.tv.cookieauth.CookieAuthConfig;
+import com.liskovsoft.smartyoutubetv2.common.cookieauth.CookieAuthClient;
+import com.liskovsoft.smartyoutubetv2.common.cookieauth.CookieAuthConfig;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsReporter;
 import com.liskovsoft.smartyoutubetv2.tv.ui.webbrowser.WebBrowserActivity;
 
 import com.liskovsoft.youtubeapi.app.CookieAuthStore;
@@ -110,8 +111,11 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
         }
 
         try {
-            CookieAuthStore.setCookies(fetchCookiesBlocking());
+            String cookies = fetchCookiesBlocking();
+            CookieAuthStore.setCookies(cookies);
             Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
+            // Length only, at every level: this is a full Google session.
+            DiagnosticsReporter.reportSecretLength("cookies_loaded", "cookie", cookies);
             startCookieRefresh();
         } catch (Throwable e) {
             Log.w(COOKIE_TAG, "cookie load failed: " + e);

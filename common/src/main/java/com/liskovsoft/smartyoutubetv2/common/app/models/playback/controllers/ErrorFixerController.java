@@ -5,6 +5,8 @@ import android.annotation.SuppressLint;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsConfig.Level;
+import com.liskovsoft.smartyoutubetv2.common.diagnostics.DiagnosticsReporter;
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
@@ -33,6 +35,13 @@ public class ErrorFixerController extends BasePlayerController implements OnLong
     @Override
     public void onEngineError(int type, int rendererIndex, Throwable error) {
         Log.e(TAG, "Player error occurred: %s. Trying to fix…", type);
+
+        // The message carries the http status when there is one, which is the
+        // single most useful thing to know about a stream that never started.
+        DiagnosticsReporter.report(Level.BASIC, "engine_error",
+                "type", type,
+                "renderer", rendererIndex,
+                "message", error == null ? "null" : String.valueOf(error.getMessage()));
 
         runEngineErrorAction(type, rendererIndex, error);
     }

@@ -22,6 +22,30 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles 'consumer-rules.pro'
 
+        // Per-deployment configuration, injected at build time so nothing
+        // deployment-specific -- least of all a live secret -- lands in git.
+        // Empty defaults leave both features switched off, which is what a
+        // build that reaches the wrong device should do.
+        //
+        // The cookie service and the diagnostics collector hold separate
+        // certificates and separate tokens, so neither can be used to reach the
+        // other. tools/build.sh pulls all six values off the host running them.
+        buildConfigField "String", "COOKIE_AUTH_ENDPOINT",
+                "\"" + (project.findProperty("cookieAuthEndpoint") ?: "") + "\""
+        buildConfigField "String", "COOKIE_AUTH_TOKEN",
+                "\"" + (project.findProperty("cookieAuthToken") ?: "") + "\""
+        buildConfigField "String", "COOKIE_AUTH_PIN",
+                "\"" + (project.findProperty("cookieAuthPin") ?: "") + "\""
+
+        buildConfigField "String", "DIAG_ENDPOINT",
+                "\"" + (project.findProperty("diagEndpoint") ?: "") + "\""
+        buildConfigField "String", "DIAG_TOKEN",
+                "\"" + (project.findProperty("diagToken") ?: "") + "\""
+        buildConfigField "String", "DIAG_PIN",
+                "\"" + (project.findProperty("diagPin") ?: "") + "\""
+        buildConfigField "String", "DIAG_LEVEL",
+                "\"" + (project.findProperty("diagLevel") ?: "off") + "\""
+
         // More info: http://myhexaville.com/2017/03/10/android-multidex/
         // Additionally, you should extend your application from MultiDexApplication
         multiDexEnabled = true
