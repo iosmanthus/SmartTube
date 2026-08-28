@@ -35,8 +35,10 @@ CODE="$(date +%Y%m%d)$SERIAL"
 SUFFIX="-$(date +%Y.%m.%d)"
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${SVC_HOST:-macmini-home}"
-LAN_IP="${SVC_LAN_IP:-192.168.31.102}"
+# No defaults: these describe somebody's own network, and a fork's build script
+# is not the place to write one down. Set them in the environment.
+HOST="${SVC_HOST:?set SVC_HOST to the ssh target that runs the services}"
+LAN_IP="${SVC_LAN_IP:?set SVC_LAN_IP to the address the tv reaches it on}"
 # The update source lives on the same always-on box as the services, not on
 # whatever laptop did the build. A laptop's dhcp address changes, and an address
 # with no host behind it is worse than one that refuses: the connect hangs
@@ -46,8 +48,8 @@ LAN_IP="${SVC_LAN_IP:-192.168.31.102}"
 # machine reaches it to upload; SERVE_HOST is what gets compiled into the app,
 # so it has to be something the television can resolve and route to -- an ssh
 # alias is neither.
-SERVE_SSH="${SERVE_SSH:-macmini-home}"
-SERVE_HOST="${SERVE_HOST:-192.168.31.102}"
+SERVE_SSH="${SERVE_SSH:-$HOST}"
+SERVE_HOST="${SERVE_HOST:-$LAN_IP}"
 SERVE_PORT="${SERVE_PORT:-8088}"
 SERVE_DIR="${SERVE_DIR:-/var/lib/smarttube-updatesvc}"
 # shellcheck disable=SC2029  # the argument is meant to expand on this side
