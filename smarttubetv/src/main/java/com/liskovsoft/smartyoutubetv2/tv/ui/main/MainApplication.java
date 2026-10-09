@@ -113,6 +113,9 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
      * moved on. The in-memory copy is deliberately kept across a failed
      * refresh: it is probably still good, and dropping it would turn a blip in
      * the service into a device that cannot play at all.
+     *
+     * Besides the schedule, the api layer asks for a refresh when a video is
+     * refused, which is how cookies that have gone stale usually show up.
      */
     private void loadSessionCookies() {
         if (!CookieAuthConfig.isConfigured()) {
@@ -124,21 +127,28 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
             public void run() {
                 CookieAuthClient client = new CookieAuthClient();
                 int failures = 0;
+                long loadedAt = 0;
+                String trigger = "startup";
 
                 while (true) {
                     long started = System.currentTimeMillis();
                     CookieAuthClient.Result result = client.fetchWithReason();
                     long tookMs = System.currentTimeMillis() - started;
 
-                    long sleepMs;
+                    long dueAt;
                     if (result.header != null) {
                         CookieAuthStore.setCookies(result.header);
+                        // age_ms is the wall time since the previous load. Hours
+                        // of it on a "schedule" trigger mean the device slept.
                         DiagnosticsReporter.report(Level.BASIC, "cookies_loaded",
                                 "cookie_len", result.header.length(),
                                 "took_ms", tookMs,
-                                "after_failures", failures);
+                                "after_failures", failures,
+                                "trigger", trigger,
+                                "age_ms", loadedAt == 0 ? -1 : started - loadedAt);
                         failures = 0;
-                        sleepMs = CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
+                        loadedAt = started;
+                        dueAt = started + CookieAuthConfig.REFRESH_MINUTES * 60L * 1000L;
                     } else {
                         failures++;
                         // The elapsed time separates a refusal from a timeout
@@ -146,18 +156,32 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
                         DiagnosticsReporter.report(Level.BASIC, "cookies_failed",
                                 "reason", result.reason,
                                 "took_ms", tookMs,
-                                "failures", failures);
+                                "failures", failures,
+                                "trigger", trigger);
                         // Back off, but never past a minute: a failure used to
                         // fall through to the refresh interval, so one unlucky
                         // timeout at startup cost twenty minutes of a device
                         // that could not play anything.
-                        sleepMs = Math.min(CookieAuthConfig.RETRY_MAX_MS, 5000L * failures);
+                        dueAt = System.currentTimeMillis()
+                                + Math.min(CookieAuthConfig.RETRY_MAX_MS, 5000L * failures);
                     }
 
                     Log.i(COOKIE_TAG, "cookie auth enabled=" + CookieAuthStore.isEnabled());
 
+                    // Wait for the wall clock to reach dueAt, in steps of
+                    // CLOCK_CHECK_MS rather than one long sleep (see there), or
+                    // until the api layer asks for fresh cookies sooner.
                     try {
-                        Thread.sleep(sleepMs);
+                        trigger = null;
+                        while (trigger == null) {
+                            long remaining = dueAt - System.currentTimeMillis();
+                            if (remaining <= 0) {
+                                trigger = "schedule";
+                            } else {
+                                trigger = CookieAuthStore.awaitRefreshRequest(
+                                        Math.min(remaining, CookieAuthConfig.CLOCK_CHECK_MS));
+                            }
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         return;

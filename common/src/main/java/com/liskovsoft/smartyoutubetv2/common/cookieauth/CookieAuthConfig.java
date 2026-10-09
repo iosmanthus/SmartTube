@@ -53,6 +53,19 @@ public final class CookieAuthConfig {
      */
     public static final int REFRESH_MINUTES = 20;
 
+    /**
+     * How often the loader looks at the clock while it waits for a refresh.
+     *
+     * The refresh is due by the wall clock, not by how long the thread has
+     * waited: on Android a sleep counts only the time the device is awake. A
+     * tv that went to standby with a refresh twenty minutes away woke up hours
+     * later with it still twenty minutes away, and played on cookies from
+     * before it slept, which the session had long since rotated past. Looking
+     * every minute bounds how long a device that just woke up goes on with
+     * them.
+     */
+    public static final int CLOCK_CHECK_MS = 60_000;
+
     private CookieAuthConfig() {
     }
 
